@@ -1,5 +1,8 @@
 Shape File Convert
 ==================
+
+##THIS IS A WORK IN PROGRESS
+
 Shape file conversion tool for BRL Mapping.
 
 Requires go-shp package. Use following command to install:
