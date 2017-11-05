@@ -1,61 +1,118 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 
 	shp "github.com/jonas-p/go-shp"
 )
 
-type flags struct {
-	Input    string
-	Output   string
-	Test     bool
-	Verbose  bool
-	Centers  bool
-	Routes   bool
-	ZipCodes bool
+func main() {
+	passedFlags := parseFlags()
+	processCommand(passedFlags)
 }
 
-func main() {
-	inputPointer := flag.String("i", "", "File to read")
-	outputPointer := flag.String("o", "", "File to read")
+func parseFlags() flags {
+
+	inputPointer := flag.String("i", "", "File for input")
+	outputPointer := flag.String("o", "", "File for output")
+	appendPointer := flag.Bool("a", false, "Append to output")
 	testPointer := flag.Bool("t", false, "Run test mode")
 	verbosePointer := flag.Bool("v", false, "Verbose output")
 	centerPointer := flag.Bool("c", false, "Convert centers")
 	routePointer := flag.Bool("r", false, "Convert routes")
 	zipCodePointer := flag.Bool("z", false, "Convert zip codes")
-
+	inRootPointer := flag.String("b", "", "Batch input root")
 	flag.Parse()
 
-	passedFlags := flags{
-		Input:    *inputPointer,
-		Output:   *outputPointer,
-		Test:     *testPointer,
-		Verbose:  *verbosePointer,
-		Centers:  *centerPointer,
-		Routes:   *routePointer,
-		ZipCodes: *zipCodePointer}
+	commandFlags := flags{
+		Input:     *inputPointer,
+		Output:    *outputPointer,
+		Append:    *appendPointer,
+		Test:      *testPointer,
+		Verbose:   *verbosePointer,
+		Centers:   *centerPointer,
+		Routes:    *routePointer,
+		ZipCodes:  *zipCodePointer,
+		InputRoot: *inRootPointer}
 
-	if passedFlags.Input != "" {
-		writeCsv(passedFlags)
-	} else if passedFlags.Centers == true {
-		convertCenters()
-	} else if passedFlags.Routes == true {
-		convertRoutes()
-	} else if passedFlags.ZipCodes == true {
-		convertZips()
+	return commandFlags
+}
+
+func processCommand(passedFlags flags) {
+	if passedFlags.InputRoot != "" {
+		inputPath := passedFlags.Input
+		processed := 0
+		fmt.Printf("Processing root %v\n", passedFlags.InputRoot)
+		if passedFlags.InputRoot != "" {
+			if passedFlags.Routes {
+				processed = convertAllShapes(routeFiles, passedFlags)
+			} else {
+				processed = convertAllShapes(zipFiles, passedFlags)
+			}
+		} else {
+			var output io.Writer
+			var err error
+			fmt.Printf("Converting %v", inputPath)
+			if passedFlags.Append {
+				output, err = os.OpenFile(passedFlags.Output, os.O_APPEND|os.O_WRONLY, 0600)
+			} else {
+				output, err = os.Create(passedFlags.Output)
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			if passedFlags.Centers {
+				writeCentroidOutput(inputPath, output)
+			} else {
+				processed = writePolygonOutput(inputPath, output)
+			}
+		}
+		fmt.Printf("...%v processed\n", processed)
 	}
 }
 
-func writeCsv(currentFlags flags) {
+func writeCentroidOutput(inputPath string, writer io.Writer) {
+	input, err := os.Open(inputPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	reader := csv.NewReader(input)
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		geocode := record[0]
+		latitude := record[1]
+		latitude = latitude[1 : len(latitude)-1]
+		longitude := record[2]
+
+		latitude = padLeft(latitude, "0", 10)
+		longitude = padLeft(longitude, "0", 10)
+
+		//fmt.Println(zipCode, latitude, longitude)
+		io.WriteString(writer, geocode+latitude+longitude+"\n")
+	}
+}
+
+func writePolygonOutput(inputPath string, writer io.Writer) int {
 	const GEOCODE string = "GEOCODE"
-	path := currentFlags.Input
+	var processed int
+	processed = 0
+
 	// open a shapefile for reading
-	shape, err := shp.Open(path)
+	shape, err := shp.Open(inputPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,24 +137,29 @@ func writeCsv(currentFlags flags) {
 
 		// Declare as int32 to it jives with pointCount. Better way?  Probably.
 		var i int32
+		var line string
 
 		for i = 0; i < pointCount; i++ {
 			point := polyZ.Points[i]
 			for k, f := range fields {
+				processed++
 				fieldName := fieldNameToString(f.Name)
 				if fieldName == GEOCODE {
 					geocode = shape.ReadAttribute(n, k)
 					if prevGeocode != geocode {
-						fmt.Println("#" + geocode)
+						line = "#" + geocode
+						io.WriteString(writer, line+"\n")
 					}
 					prevGeocode = geocode
 				}
 			}
 			pointX := strconv.FormatFloat(point.X, 'f', 6, 32)
 			pointY := strconv.FormatFloat(point.Y, 'f', 6, 32)
-			fmt.Println(pointX + " " + pointY)
+			line = pointX + " " + pointY
+			io.WriteString(writer, line+"\n")
 		}
 	}
+	return processed
 }
 
 // Convert the field name to string
@@ -110,14 +172,29 @@ func fieldNameToString(bytes [11]byte) string {
 	return returnString
 }
 
-func convertRoutes() {
-	fmt.Printf("Not yet implemented")
+func convertAllShapes(fileList [51]string, currentFlags flags) int {
+	var processed int
+	var totalProcessed int
+	outputFile := currentFlags.Output
+	output, err := os.Create(outputFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, file := range fileList {
+		inputFile := currentFlags.InputRoot + "/" + file
+		fmt.Printf("Converting %v", file)
+		processed = writePolygonOutput(inputFile, output)
+		fmt.Printf("...%v processed\n", processed)
+		totalProcessed += processed
+	}
+	return totalProcessed
 }
 
-func convertZips() {
-	fmt.Printf("Not yet implemented")
-}
-
-func convertCenters() {
-	fmt.Printf("Not yet implemented")
+func padLeft(str, pad string, length int) string {
+	for {
+		str = pad + str
+		if len(str) > length {
+			return str[0:length]
+		}
+	}
 }
