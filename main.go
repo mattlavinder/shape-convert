@@ -56,6 +56,7 @@ func processCommand(passedFlags flags) {
 			} else {
 				processed = convertAllShapes(zipFiles, passedFlags)
 			}
+			fmt.Printf("Total processed: %v\n", processed)
 		} else {
 			var output io.Writer
 			var err error
@@ -73,8 +74,8 @@ func processCommand(passedFlags flags) {
 			} else {
 				processed = writePolygonOutput(inputPath, output)
 			}
+			fmt.Printf("...%v processed\n", processed)
 		}
-		fmt.Printf("...%v processed\n", processed)
 	}
 }
 
