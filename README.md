@@ -3,7 +3,7 @@ Shape File Convert
 
 **THIS IS A WORK IN PROGRESS**
 
-Shape file conversion tool for BRL Mapping.
+Shape file conversion tool.
 
 Requires go-shp package. Use following command to install:
 
